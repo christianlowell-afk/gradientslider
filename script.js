@@ -1,11 +1,3 @@
-/*
-  Infinite 3D Cards Carousel - Performance Optimized
-  - Eliminated initial scroll/drag jank
-  - Proper image preloading and decode
-  - Optimized transform calculations
-  - Smoother compositing and paint layers
-*/
-
 const IMAGES = [
   './img/img01.webp', './img/img02.webp', './img/img03.webp', './img/img04.webp',
   './img/img05.webp', './img/img06.webp', './img/img07.webp', './img/img08.webp',
