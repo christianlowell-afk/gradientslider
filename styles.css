@@ -1,14 +1,11 @@
 /* Reset & base */
 * { box-sizing: border-box; }
 html, body { height: 100%; }
-body { margin: 0; background: #fff; color: #0b0b0b; font: 400 16px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+body { margin: 0; font: 400 16px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
 
 :root {
   --bg: #f0f0f0;
   --fg: #0b0b0b;
-  --muted: #8a8a8a;
-  --gap: clamp(16px, 3vw, 28px);
-  --shadow: 0 16px 40px rgba(0,0,0,.10), 0 4px 8px rgba(0,0,0,.06);
   --perspective: 1800px;
   --ease: cubic-bezier(.22,1,.36,1);
 }
@@ -48,8 +45,6 @@ body { margin: 0; background: #fff; color: #0b0b0b; font: 400 16px/1.4 ui-sans-s
   position: absolute; inset: 0; z-index: 10;
   transform-style: preserve-3d;
 }
-
-/* Grid mode removed */
 
 /* Card */
 .card {
