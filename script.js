@@ -727,6 +727,8 @@ let lastDelta = 0;
 // Pointer down - start dragging
 stage.addEventListener('pointerdown', (e) => {
   if (isEntering) return;
+  if (e.target.closest('.frame')) return;
+  
   dragging = true;
   lastX = e.clientX;
   lastT = performance.now();
