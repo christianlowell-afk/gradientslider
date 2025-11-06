@@ -129,15 +129,3 @@ body {
     animation: none !important;
   }
 }
-
-#fixed-text {
-  position: fixed;
-  top: 0;
-  left: 0;
-  display: flex;
-  justify-content: center;
-  height: 100%;
-  width: 100%;
-  font-size: 18vw;
-  text-transform: uppercase;
-}

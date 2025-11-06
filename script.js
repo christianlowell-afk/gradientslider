@@ -1,6 +1,12 @@
 /*
   Infinite Gradient 3D Carousel
+  A smooth, infinite-scrolling 3D carousel with dynamic gradient backgrounds
+  that change based on the active card's colors.
 */
+
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
 
 const IMAGES = [
   './img/img01.webp',
@@ -15,51 +21,88 @@ const IMAGES = [
   './img/img10.webp',
 ];
 
-// DOM references
+// Physics constants
+const FRICTION = 0.9;           // Velocity decay (0-1, lower = more friction)
+const WHEEL_SENS = 0.6;         // Mouse wheel sensitivity
+const DRAG_SENS = 1.0;          // Drag sensitivity
+
+// Visual constants
+const MAX_ROTATION = 28;        // Maximum card rotation in degrees
+const MAX_DEPTH = 140;          // Maximum Z-axis depth in pixels
+const MIN_SCALE = 0.92;         // Minimum card scale
+const SCALE_RANGE = 0.1;        // Scale variation range
+const GAP = 28;                 // Gap between cards in pixels
+
+// ============================================================================
+// DOM REFERENCES
+// ============================================================================
+
 const stage = document.querySelector('.stage');
 const cardsRoot = document.getElementById('cards');
 const bgCanvas = document.getElementById('bg');
 const bgCtx = bgCanvas?.getContext('2d', { alpha: false });
 const loader = document.getElementById('loader');
 
-// State
-let items = [];
-let positions = [];
-let rafId = null;
-let lastTime = 0;
-let isEntering = true;
-let activeIndex = -1;
+// ============================================================================
+// STATE MANAGEMENT
+// ============================================================================
+
+// Carousel state
+let items = [];                 // Array of {el: HTMLElement, x: number}
+let positions = [];             // Float32Array for wrapped positions
+let activeIndex = -1;           // Currently centered card index
+let isEntering = true;          // Prevents interaction during entry animation
+
+// Layout measurements
+let CARD_W = 300;               // Card width (measured dynamically)
+let CARD_H = 400;               // Card height (measured dynamically)
+let STEP = CARD_W + GAP;        // Distance between card centers
+let TRACK = 0;                  // Total carousel track length
+let SCROLL_X = 0;               // Current scroll position
 let VW_HALF = window.innerWidth * 0.5;
 
-// Layout
-let CARD_W = 300;
-let CARD_H = 400;
-let GAP = 28;
-let STEP = CARD_W + GAP;
-let TRACK = 0;
-let SCROLL_X = 0;
+// Physics state
+let vX = 0;                     // Velocity in X direction
 
-// Physics
-let vX = 0;
-const FRICTION = 0.9;
-const WHEEL_SENS = 1.0;
-const DRAG_SENS = 1.0;
+// Animation frame IDs
+let rafId = null;               // Carousel animation frame
+let bgRAF = null;               // Background animation frame
+let lastTime = 0;               // Last frame timestamp
+let lastBgDraw = 0;             // Last background draw time
 
-// Background animation
-let gradPalette = [];
-let gradCurrent = { r1: 240, g1: 240, b1: 240, r2: 235, g2: 235, b2: 235 };
-let bgRAF = null;
-let lastBgDraw = 0;
-let bgFastUntil = 0;
+// Background gradient state
+let gradPalette = [];           // Extracted colors from each image
+let gradCurrent = {             // Current interpolated gradient colors
+  r1: 240, g1: 240, b1: 240,    // First gradient color (RGB)
+  r2: 235, g2: 235, b2: 235     // Second gradient color (RGB)
+};
+let bgFastUntil = 0;            // Timestamp until which to render at high FPS
 
-// Safe modulo
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Safe modulo operation that handles negative numbers correctly
+ * @param {number} n - The dividend
+ * @param {number} m - The divisor
+ * @returns {number} The positive remainder
+ */
 function mod(n, m) {
   return ((n % m) + m) % m;
 }
 
-// Preload images with link tags for browser preload
+// ============================================================================
+// IMAGE PRELOADING
+// ============================================================================
+
+/**
+ * Preload images using link tags for browser optimization
+ * @param {string[]} srcs - Array of image URLs
+ */
 function preloadImageLinks(srcs) {
   if (!document.head) return;
+  
   srcs.forEach((href) => {
     const link = document.createElement('link');
     link.rel = 'preload';
@@ -70,55 +113,10 @@ function preloadImageLinks(srcs) {
   });
 }
 
-// Create card elements
-function createCards() {
-  cardsRoot.innerHTML = '';
-  items = [];
-
-  const fragment = document.createDocumentFragment();
-
-  IMAGES.forEach((src, i) => {
-    const card = document.createElement('article');
-    card.className = 'card';
-
-    // Force GPU compositing layer immediately
-    card.style.willChange = 'transform';
-
-    const img = new Image();
-    img.className = 'card__img';
-    img.decoding = 'async';
-    img.loading = 'eager';
-    img.fetchPriority = 'high';
-    img.draggable = false;
-    img.src = src;
-
-    card.appendChild(img);
-    fragment.appendChild(card);
-    items.push({ el: card, x: 0 });
-  });
-
-  cardsRoot.appendChild(fragment);
-}
-
-// Measure card dimensions
-function measure() {
-  const sample = items[0]?.el;
-  if (!sample) return;
-
-  const r = sample.getBoundingClientRect();
-  CARD_W = r.width || CARD_W;
-  CARD_H = r.height || CARD_H;
-  STEP = CARD_W + GAP;
-  TRACK = items.length * STEP;
-
-  items.forEach((it, i) => {
-    it.x = i * STEP;
-  });
-
-  positions = new Float32Array(items.length);
-}
-
-// Wait for all images to load
+/**
+ * Wait for all card images to finish loading
+ * @returns {Promise<void>}
+ */
 function waitForImages() {
   const promises = items.map((it) => {
     const img = it.el.querySelector('img');
@@ -134,7 +132,10 @@ function waitForImages() {
   return Promise.all(promises);
 }
 
-// Decode all images to avoid jank on first interaction
+/**
+ * Decode all images to prevent jank during first interaction
+ * @returns {Promise<void>}
+ */
 async function decodeAllImages() {
   const tasks = items.map((it) => {
     const img = it.el.querySelector('img');
@@ -150,13 +151,66 @@ async function decodeAllImages() {
   await Promise.allSettled(tasks);
 }
 
-// Transform calculation (memoized constants)
-const MAX_ROTATION = 28;
-const MAX_DEPTH = 140;
-const MIN_SCALE = 0.92;
-const SCALE_RANGE = 0.1;
+// ============================================================================
+// CAROUSEL SETUP
+// ============================================================================
 
-function transformForScreenX(screenX) {
+/**
+ * Create card DOM elements from image array
+ */
+function createCards() {
+  cardsRoot.innerHTML = '';
+  items = [];
+
+  const fragment = document.createDocumentFragment();
+
+  IMAGES.forEach((src, i) => {
+    const card = document.createElement('article');
+    card.className = 'card';
+    card.style.willChange = 'transform'; // Force GPU compositing
+
+    const img = new Image();
+    img.className = 'card__img';
+    img.decoding = 'async';
+    img.loading = 'eager';
+    img.fetchPriority = 'high';
+    img.draggable = false;
+    img.src = src;
+
+    card.appendChild(img);
+    fragment.appendChild(card);
+    items.push({ el: card, x: i * STEP });
+  });
+
+  cardsRoot.appendChild(fragment);
+}
+
+/**
+ * Measure card dimensions and calculate layout
+ */
+function measure() {
+  const sample = items[0]?.el;
+  if (!sample) return;
+
+  const r = sample.getBoundingClientRect();
+  CARD_W = r.width || CARD_W;
+  CARD_H = r.height || CARD_H;
+  STEP = CARD_W + GAP;
+  TRACK = items.length * STEP;
+
+  // Set initial positions
+  items.forEach((it, i) => {
+    it.x = i * STEP;
+  });
+
+  positions = new Float32Array(items.length);
+}
+
+// ============================================================================
+// TRANSFORM CALCULATIONS
+// ============================================================================
+
+function computeTransformComponents(screenX) {
   const norm = Math.max(-1, Math.min(1, screenX / VW_HALF));
   const absNorm = Math.abs(norm);
   const invNorm = 1 - absNorm;
@@ -165,25 +219,43 @@ function transformForScreenX(screenX) {
   const tz = invNorm * MAX_DEPTH;
   const scale = MIN_SCALE + invNorm * SCALE_RANGE;
 
+  return { norm, absNorm, invNorm, ry, tz, scale };
+}
+
+
+/**
+ * Calculate 3D transform for a card based on its screen position
+ * @param {number} screenX - Card's X position relative to viewport center
+ * @returns {{transform: string, z: number}} Transform string and Z-depth
+ */
+function transformForScreenX(screenX) {
+  const { ry, tz, scale } = computeTransformComponents(screenX);
+
   return {
     transform: `translate3d(${screenX}px,-50%,${tz}px) rotateY(${ry}deg) scale(${scale})`,
     z: tz,
   };
 }
 
-// Update carousel transforms
+/**
+ * Update all card transforms based on current scroll position
+ */
 function updateCarouselTransforms() {
   const half = TRACK / 2;
   let closestIdx = -1;
   let closestDist = Infinity;
 
-  // Calculate wrapped positions
+  // Calculate wrapped positions for infinite scroll
   for (let i = 0; i < items.length; i++) {
     let pos = items[i].x - SCROLL_X;
+    
+    // Wrap position to nearest equivalent position
     if (pos < -half) pos += TRACK;
     if (pos > half) pos -= TRACK;
+    
     positions[i] = pos;
 
+    // Track closest card to center
     const dist = Math.abs(pos);
     if (dist < closestDist) {
       closestDist = dist;
@@ -191,10 +263,11 @@ function updateCarouselTransforms() {
     }
   }
 
+  // Get adjacent cards for selective blur
   const prevIdx = (closestIdx - 1 + items.length) % items.length;
   const nextIdx = (closestIdx + 1) % items.length;
 
-  // Apply transforms
+  // Apply transforms to all cards
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const pos = positions[i];
@@ -202,28 +275,36 @@ function updateCarouselTransforms() {
     const { transform, z } = transformForScreenX(pos);
 
     it.el.style.transform = transform;
-    it.el.style.zIndex = String(1000 + Math.round(z));
+    it.el.style.zIndex = String(1000 + Math.round(z)); // Higher z-index for cards in front
 
-    // Subtle blur on non-active cards
+    // Apply subtle blur to non-core cards
     const isCore = i === closestIdx || i === prevIdx || i === nextIdx;
     const blur = isCore ? 0 : 2 * Math.pow(Math.abs(norm), 1.1);
     it.el.style.filter = `blur(${blur.toFixed(2)}px)`;
   }
 
+  // Update gradient if active card changed
   if (closestIdx !== activeIndex) {
     setActiveGradient(closestIdx);
   }
 }
 
-// Animation loop
+// ============================================================================
+// ANIMATION LOOP
+// ============================================================================
+
+/**
+ * Main animation loop for carousel movement
+ * @param {number} t - Current timestamp
+ */
 function tick(t) {
   const dt = lastTime ? (t - lastTime) / 1000 : 0;
   lastTime = t;
 
-  // Integrate velocity
+  // Apply velocity to scroll position
   SCROLL_X = mod(SCROLL_X + vX * dt, TRACK);
 
-  // Apply friction
+  // Apply friction to velocity
   const decay = Math.pow(FRICTION, dt * 60);
   vX *= decay;
   if (Math.abs(vX) < 0.02) vX = 0;
@@ -232,6 +313,9 @@ function tick(t) {
   rafId = requestAnimationFrame(tick);
 }
 
+/**
+ * Start the carousel animation loop
+ */
 function startCarousel() {
   cancelCarousel();
   lastTime = 0;
@@ -241,45 +325,42 @@ function startCarousel() {
   });
 }
 
+/**
+ * Stop the carousel animation loop
+ */
 function cancelCarousel() {
   if (rafId) cancelAnimationFrame(rafId);
   rafId = null;
 }
 
-// Background canvas setup
-function resizeBG() {
-  if (!bgCanvas || !bgCtx) return;
+// ============================================================================
+// COLOR EXTRACTION & UTILITIES
+// ============================================================================
 
-  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-  const w = bgCanvas.clientWidth || stage.clientWidth;
-  const h = bgCanvas.clientHeight || stage.clientHeight;
-  const tw = Math.floor(w * dpr);
-  const th = Math.floor(h * dpr);
-
-  if (bgCanvas.width !== tw || bgCanvas.height !== th) {
-    bgCanvas.width = tw;
-    bgCanvas.height = th;
-    bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-}
-
-// Color utilities
+/**
+ * Convert RGB to HSL color space
+ * @param {number} r - Red (0-255)
+ * @param {number} g - Green (0-255)
+ * @param {number} b - Blue (0-255)
+ * @returns {[number, number, number]} [hue (0-360), saturation (0-1), lightness (0-1)]
+ */
 function rgbToHsl(r, g, b) {
   r /= 255;
   g /= 255;
   b /= 255;
+  
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
-  let h,
-    s,
-    l = (max + min) / 2;
+  let h, s;
+  const l = (max + min) / 2;
 
   if (max === min) {
     h = 0;
-    s = 0;
+    s = 0; // Achromatic
   } else {
     const d = max - min;
     s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    
     switch (max) {
       case r:
         h = (g - b) / d + (g < b ? 6 : 0);
@@ -297,13 +378,20 @@ function rgbToHsl(r, g, b) {
   return [h * 360, s, l];
 }
 
+/**
+ * Convert HSL to RGB color space
+ * @param {number} h - Hue (0-360)
+ * @param {number} s - Saturation (0-1)
+ * @param {number} l - Lightness (0-1)
+ * @returns {[number, number, number]} [red (0-255), green (0-255), blue (0-255)]
+ */
 function hslToRgb(h, s, l) {
   h = ((h % 360) + 360) % 360;
   h /= 360;
   let r, g, b;
 
   if (s === 0) {
-    r = g = b = l;
+    r = g = b = l; // Achromatic
   } else {
     const hue2rgb = (p, q, t) => {
       if (t < 0) t += 1;
@@ -313,6 +401,7 @@ function hslToRgb(h, s, l) {
       if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
       return p;
     };
+    
     const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
     const p = 2 * l - q;
     r = hue2rgb(p, q, h + 1 / 3);
@@ -323,22 +412,34 @@ function hslToRgb(h, s, l) {
   return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
 
+/**
+ * Generate fallback colors when extraction fails
+ * @param {number} idx - Card index
+ * @returns {{c1: number[], c2: number[]}} Two RGB colors
+ */
 function fallbackFromIndex(idx) {
-  const h = (idx * 37) % 360;
+  const h = (idx * 37) % 360; // Spread hues across spectrum
   const s = 0.65;
   const c1 = hslToRgb(h, s, 0.52);
   const c2 = hslToRgb(h, s, 0.72);
   return { c1, c2 };
 }
 
-// Extract colors from image
+/**
+ * Extract dominant colors from an image using histogram analysis
+ * @param {HTMLImageElement} img - Image element to analyze
+ * @param {number} idx - Card index (for fallback)
+ * @returns {{c1: number[], c2: number[]}} Two dominant RGB colors
+ */
 function extractColors(img, idx) {
   try {
+    // Downscale image for faster processing
     const MAX = 48;
     const ratio = img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1;
     const tw = ratio >= 1 ? MAX : Math.max(16, Math.round(MAX * ratio));
     const th = ratio >= 1 ? Math.max(16, Math.round(MAX / ratio)) : MAX;
 
+    // Draw image to temporary canvas
     const canvas = document.createElement('canvas');
     canvas.width = tw;
     canvas.height = th;
@@ -346,37 +447,44 @@ function extractColors(img, idx) {
     ctx.drawImage(img, 0, 0, tw, th);
     const data = ctx.getImageData(0, 0, tw, th).data;
 
-    const H_BINS = 36;
-    const S_BINS = 5;
+    // Create 2D histogram bins (hue × saturation)
+    const H_BINS = 36; // 10° hue increments
+    const S_BINS = 5;  // 20% saturation increments
     const SIZE = H_BINS * S_BINS;
-    const wSum = new Float32Array(SIZE);
-    const rSum = new Float32Array(SIZE);
-    const gSum = new Float32Array(SIZE);
-    const bSum = new Float32Array(SIZE);
+    const wSum = new Float32Array(SIZE); // Weighted pixel count
+    const rSum = new Float32Array(SIZE); // Weighted red sum
+    const gSum = new Float32Array(SIZE); // Weighted green sum
+    const bSum = new Float32Array(SIZE); // Weighted blue sum
 
+    // Analyze each pixel
     for (let i = 0; i < data.length; i += 4) {
       const a = data[i + 3] / 255;
-      if (a < 0.05) continue;
+      if (a < 0.05) continue; // Skip transparent pixels
 
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
       const [h, s, l] = rgbToHsl(r, g, b);
 
+      // Skip near-white, near-black, and desaturated colors
       if (l < 0.1 || l > 0.92 || s < 0.08) continue;
 
+      // Weight by saturation and mid-tone preference
       const w = a * (s * s) * (1 - Math.abs(l - 0.5) * 0.6);
+      
+      // Calculate bin indices
       const hi = Math.max(0, Math.min(H_BINS - 1, Math.floor((h / 360) * H_BINS)));
       const si = Math.max(0, Math.min(S_BINS - 1, Math.floor(s * S_BINS)));
       const bidx = hi * S_BINS + si;
 
+      // Accumulate weighted values
       wSum[bidx] += w;
       rSum[bidx] += r * w;
       gSum[bidx] += g * w;
       bSum[bidx] += b * w;
     }
 
-    // Find primary color
+    // Find primary color (bin with highest weight)
     let pIdx = -1;
     let pW = 0;
     for (let i = 0; i < SIZE; i++) {
@@ -390,39 +498,49 @@ function extractColors(img, idx) {
 
     const pHue = Math.floor(pIdx / S_BINS) * (360 / H_BINS);
 
-    // Find secondary color
+    // Find secondary color (sufficiently different hue)
     let sIdx = -1;
     let sW = 0;
     for (let i = 0; i < SIZE; i++) {
       const w = wSum[i];
       if (w <= 0) continue;
+      
       const h = Math.floor(i / S_BINS) * (360 / H_BINS);
       let dh = Math.abs(h - pHue);
-      dh = Math.min(dh, 360 - dh);
-      if (dh >= 25 && w > sW) {
+      dh = Math.min(dh, 360 - dh); // Shortest distance on color wheel
+      
+      if (dh >= 25 && w > sW) { // At least 25° different
         sW = w;
         sIdx = i;
       }
     }
 
+    // Calculate weighted average RGB for a bin
     const avgRGB = (idx) => {
       const w = wSum[idx] || 1e-6;
-      return [Math.round(rSum[idx] / w), Math.round(gSum[idx] / w), Math.round(bSum[idx] / w)];
+      return [
+        Math.round(rSum[idx] / w),
+        Math.round(gSum[idx] / w),
+        Math.round(bSum[idx] / w)
+      ];
     };
 
+    // Build primary color
     const [pr, pg, pb] = avgRGB(pIdx);
     let [h1, s1] = rgbToHsl(pr, pg, pb);
-    s1 = Math.max(0.45, Math.min(1, s1 * 1.15));
-
+    s1 = Math.max(0.45, Math.min(1, s1 * 1.15)); // Boost saturation
     const c1 = hslToRgb(h1, s1, 0.5);
-    let c2;
 
+    // Build secondary color
+    let c2;
     if (sIdx >= 0 && sW >= pW * 0.6) {
+      // Use distinct secondary color
       const [sr, sg, sb] = avgRGB(sIdx);
       let [h2, s2] = rgbToHsl(sr, sg, sb);
       s2 = Math.max(0.45, Math.min(1, s2 * 1.05));
       c2 = hslToRgb(h2, s2, 0.72);
     } else {
+      // Use lighter version of primary
       c2 = hslToRgb(h1, s1, 0.72);
     }
 
@@ -432,6 +550,9 @@ function extractColors(img, idx) {
   }
 }
 
+/**
+ * Extract colors from all card images
+ */
 function buildPalette() {
   gradPalette = items.map((it, i) => {
     const img = it.el.querySelector('img');
@@ -439,6 +560,10 @@ function buildPalette() {
   });
 }
 
+/**
+ * Set the active gradient based on the centered card
+ * @param {number} idx - Card index
+ */
 function setActiveGradient(idx) {
   if (!bgCtx || idx < 0 || idx >= items.length || idx === activeIndex) return;
 
@@ -453,21 +578,48 @@ function setActiveGradient(idx) {
     b2: pal.c2[2],
   };
 
+  // Animate transition with GSAP if available
   if (window.gsap) {
-    bgFastUntil = performance.now() + 800;
+    bgFastUntil = performance.now() + 800; // High FPS for smooth transition
     window.gsap.to(gradCurrent, { ...to, duration: 0.45, ease: 'power2.out' });
   } else {
     Object.assign(gradCurrent, to);
   }
 }
 
-// Background rendering
+// ============================================================================
+// BACKGROUND RENDERING
+// ============================================================================
+
+/**
+ * Resize background canvas to match viewport
+ */
+function resizeBG() {
+  if (!bgCanvas || !bgCtx) return;
+
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const w = bgCanvas.clientWidth || stage.clientWidth;
+  const h = bgCanvas.clientHeight || stage.clientHeight;
+  const tw = Math.floor(w * dpr);
+  const th = Math.floor(h * dpr);
+
+  if (bgCanvas.width !== tw || bgCanvas.height !== th) {
+    bgCanvas.width = tw;
+    bgCanvas.height = th;
+    bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+}
+
+/**
+ * Render animated gradient background
+ */
 function drawBackground() {
   if (!bgCanvas || !bgCtx) return;
 
   const now = performance.now();
-  const minInterval = now < bgFastUntil ? 16 : 33;
+  const minInterval = now < bgFastUntil ? 16 : 33; // 60fps or 30fps
 
+  // Throttle rendering based on transition state
   if (now - lastBgDraw < minInterval) {
     bgRAF = requestAnimationFrame(drawBackground);
     return;
@@ -479,29 +631,34 @@ function drawBackground() {
   const w = bgCanvas.clientWidth || stage.clientWidth;
   const h = bgCanvas.clientHeight || stage.clientHeight;
 
+  // Fill base color
   bgCtx.fillStyle = '#f6f7f9';
   bgCtx.fillRect(0, 0, w, h);
 
+  // Animate gradient centers
   const time = now * 0.0002;
   const cx = w * 0.5;
   const cy = h * 0.5;
-  const a1 = Math.min(w, h) * 0.35;
-  const a2 = Math.min(w, h) * 0.28;
+  const a1 = Math.min(w, h) * 0.35; // Amplitude for first gradient
+  const a2 = Math.min(w, h) * 0.28; // Amplitude for second gradient
 
+  // Calculate floating positions using trigonometry
   const x1 = cx + Math.cos(time) * a1;
   const y1 = cy + Math.sin(time * 0.8) * a1 * 0.4;
   const x2 = cx + Math.cos(-time * 0.9 + 1.2) * a2;
   const y2 = cy + Math.sin(-time * 0.7 + 0.7) * a2 * 0.5;
 
-  const r1 = Math.max(w, h) * 0.75;
-  const r2 = Math.max(w, h) * 0.65;
+  const r1 = Math.max(w, h) * 0.75; // First gradient radius
+  const r2 = Math.max(w, h) * 0.65; // Second gradient radius
 
+  // Draw first radial gradient
   const g1 = bgCtx.createRadialGradient(x1, y1, 0, x1, y1, r1);
   g1.addColorStop(0, `rgba(${gradCurrent.r1},${gradCurrent.g1},${gradCurrent.b1},0.85)`);
   g1.addColorStop(1, 'rgba(255,255,255,0)');
   bgCtx.fillStyle = g1;
   bgCtx.fillRect(0, 0, w, h);
 
+  // Draw second radial gradient
   const g2 = bgCtx.createRadialGradient(x2, y2, 0, x2, y2, r2);
   g2.addColorStop(0, `rgba(${gradCurrent.r2},${gradCurrent.g2},${gradCurrent.b2},0.70)`);
   g2.addColorStop(1, 'rgba(255,255,255,0)');
@@ -511,18 +668,30 @@ function drawBackground() {
   bgRAF = requestAnimationFrame(drawBackground);
 }
 
+/**
+ * Start background animation loop
+ */
 function startBG() {
   if (!bgCanvas || !bgCtx) return;
   cancelBG();
   bgRAF = requestAnimationFrame(drawBackground);
 }
 
+/**
+ * Stop background animation loop
+ */
 function cancelBG() {
   if (bgRAF) cancelAnimationFrame(bgRAF);
   bgRAF = null;
 }
 
-// Resize handler
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+
+/**
+ * Handle window resize
+ */
 function onResize() {
   const prevStep = STEP || 1;
   const ratio = SCROLL_X / (items.length * prevStep);
@@ -533,7 +702,7 @@ function onResize() {
   resizeBG();
 }
 
-// Input handlers
+// Mouse wheel scrolling
 stage.addEventListener(
   'wheel',
   (e) => {
@@ -546,13 +715,16 @@ stage.addEventListener(
   { passive: false }
 );
 
+// Prevent default drag behavior
 stage.addEventListener('dragstart', (e) => e.preventDefault());
 
+// Drag state
 let dragging = false;
 let lastX = 0;
 let lastT = 0;
 let lastDelta = 0;
 
+// Pointer down - start dragging
 stage.addEventListener('pointerdown', (e) => {
   if (isEntering) return;
   dragging = true;
@@ -563,6 +735,7 @@ stage.addEventListener('pointerdown', (e) => {
   stage.classList.add('dragging');
 });
 
+// Pointer move - update scroll position
 stage.addEventListener('pointermove', (e) => {
   if (!dragging) return;
 
@@ -571,24 +744,27 @@ stage.addEventListener('pointermove', (e) => {
   const dt = Math.max(1, now - lastT) / 1000;
 
   SCROLL_X = mod(SCROLL_X - dx * DRAG_SENS, TRACK);
-  lastDelta = dx / dt;
+  lastDelta = dx / dt; // Track velocity for momentum
   lastX = e.clientX;
   lastT = now;
 });
 
+// Pointer up - apply momentum
 stage.addEventListener('pointerup', (e) => {
   if (!dragging) return;
   dragging = false;
   stage.releasePointerCapture(e.pointerId);
-  vX = -lastDelta * DRAG_SENS;
+  vX = -lastDelta * DRAG_SENS; // Apply final velocity
   stage.classList.remove('dragging');
 });
 
+// Debounced resize handler
 window.addEventListener('resize', () => {
   clearTimeout(onResize._t);
   onResize._t = setTimeout(onResize, 80);
 });
 
+// Pause animations when tab is hidden
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     cancelCarousel();
@@ -599,55 +775,84 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Animate visible cards on entry
+// ============================================================================
+// INITIALIZATION & ENTRY ANIMATION
+// ============================================================================
+
+/**
+ * Animate visible cards entering the scene
+ * @param {Array} visibleCards - Cards to animate
+ */
 async function animateEntry(visibleCards) {
   await new Promise((r) => requestAnimationFrame(r));
 
-  // Animate each card in sequence with stagger
-  if (window.gsap) {
-    const tl = window.gsap.timeline();
-    visibleCards.forEach(({ item, screenX }, idx) => {
-      const { transform } = transformForScreenX(screenX);
-      tl.to(
-        item.el,
-        {
-          opacity: 1,
-          transform: transform,
-          duration: 0.6,
-          ease: 'power3.out',
+  const tl = window.gsap.timeline();
+
+  visibleCards.forEach(({ item, screenX }, idx) => {
+    const state = { p: 0 }; // 0 -> 1
+    const { ry, tz, scale: baseScale } = computeTransformComponents(screenX);
+
+    const START_SCALE = 0.92;
+    const START_Y = 40;
+
+    item.el.style.opacity = '0';
+    item.el.style.transform =
+      `translate3d(${screenX}px,-50%,${tz}px) ` +
+      `rotateY(${ry}deg) ` +
+      `scale(${START_SCALE}) ` +
+      `translateY(${START_Y}px)`;
+
+    tl.to(
+      state,
+      {
+        p: 1,
+        duration: 0.6,
+        ease: 'power3.out',
+        onUpdate: () => {
+          const t = state.p;
+
+          const currentScale = START_SCALE + (baseScale - START_SCALE) * t;
+          const currentY = START_Y * (1 - t);
+          const opacity = t;
+
+          item.el.style.opacity = opacity.toFixed(3);
+
+          if (t >= 0.999) {
+            const { transform } = transformForScreenX(screenX);
+            item.el.style.transform = transform;
+          } else {
+            item.el.style.transform =
+              `translate3d(${screenX}px,-50%,${tz}px) ` +
+              `rotateY(${ry}deg) ` +
+              `scale(${currentScale}) ` +
+              `translateY(${currentY}px)`;
+          }
         },
-        idx * 0.05
-      ); // 50ms stagger
-    });
-    await new Promise((r) => tl.eventCallback('onComplete', r));
-  } else {
-    // Fallback without GSAP
-    for (let i = 0; i < visibleCards.length; i++) {
-      const { item, screenX } = visibleCards[i];
-      const { transform } = transformForScreenX(screenX);
-      item.el.style.transition = 'opacity 0.6s ease-out, transform 0.6s ease-out';
-      item.el.style.opacity = '1';
-      item.el.style.transform = transform;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    // Clear transitions
-    await new Promise((r) => setTimeout(r, 600));
-    visibleCards.forEach(({ item }) => {
-      item.el.style.transition = '';
-    });
-  }
+      },
+      idx * 0.05
+    );
+  });
+
+  await new Promise((resolve) => {
+    tl.eventCallback('onComplete', resolve);
+  });
 }
+
+
+/**
+ * Pre-composite all card positions to prevent first-interaction jank
+ */
 async function warmupCompositing() {
   const originalScrollX = SCROLL_X;
-  const stepSize = STEP * 0.5; // Half a card width
+  const stepSize = STEP * 0.5;
   const numSteps = Math.ceil(TRACK / stepSize);
 
-  // Scroll through the entire carousel to force compositing of all cards
+  // Scroll through entire carousel to force GPU compositing
   for (let i = 0; i < numSteps; i++) {
     SCROLL_X = mod(originalScrollX + i * stepSize, TRACK);
     updateCarouselTransforms();
 
-    // Force paint for every few steps (don't need every single frame)
+    // Force paint every few steps (optimization)
     if (i % 3 === 0) {
       await new Promise((r) => requestAnimationFrame(r));
     }
@@ -660,9 +865,14 @@ async function warmupCompositing() {
   await new Promise((r) => requestAnimationFrame(r));
 }
 
-// Initialize
+/**
+ * Initialize the carousel application
+ */
 async function init() {
+  // Preload images for faster loading
   preloadImageLinks(IMAGES);
+  
+  // Create DOM elements
   createCards();
   measure();
   updateCarouselTransforms();
@@ -671,19 +881,19 @@ async function init() {
   // Wait for all images to load
   await waitForImages();
 
-  // Decode all images (critical for smooth first interaction)
+  // Decode images to prevent jank
   await decodeAllImages();
 
-  // Force images to be painted by accessing offsetHeight
+  // Force browser to paint images
   items.forEach((it) => {
     const img = it.el.querySelector('img');
     if (img) void img.offsetHeight;
   });
 
-  // Build color palette
+  // Extract colors from images for gradients
   buildPalette();
 
-  // Set initial gradient
+  // Find and set initial centered card
   const half = TRACK / 2;
   let closestIdx = 0;
   let closestDist = Infinity;
@@ -701,7 +911,7 @@ async function init() {
 
   setActiveGradient(closestIdx);
 
-  // Initialize background canvas immediately
+  // Initialize background canvas
   resizeBG();
   if (bgCtx) {
     const w = bgCanvas.clientWidth || stage.clientWidth;
@@ -710,23 +920,22 @@ async function init() {
     bgCtx.fillRect(0, 0, w, h);
   }
 
-  // Warmup: move carousel slightly to force all layers to composite
+  // Warmup GPU compositing
   await warmupCompositing();
 
-  // Extra safety: wait for idle
+  // Wait for browser idle time
   if ('requestIdleCallback' in window) {
     await new Promise((r) => requestIdleCallback(r, { timeout: 100 }));
   }
 
-  // Start background animation first (before card animation)
+  // Start background animation
   startBG();
   await new Promise((r) => setTimeout(r, 100)); // Let background settle
 
-  // Animate visible cards entering
+  // Prepare entry animation for visible cards
   const viewportWidth = window.innerWidth;
-
-  // Find all cards currently in viewport
   const visibleCards = [];
+  
   for (let i = 0; i < items.length; i++) {
     let pos = items[i].x - SCROLL_X;
     if (pos < -half) pos += TRACK;
@@ -738,25 +947,24 @@ async function init() {
     }
   }
 
-  // Sort left to right
+  // Sort cards left to right
   visibleCards.sort((a, b) => a.screenX - b.screenX);
-
-  // Set initial state (invisible, slightly below, scaled down)
-  visibleCards.forEach(({ item }) => {
-    item.el.style.opacity = '0';
-    item.el.style.transform =
-      item.el.style.transform.replace('translate3d(', 'translate3d(') + ' translateY(40px) scale(0.92)';
-  });
 
   // Hide loader
   if (loader) loader.classList.add('loader--hide');
 
+  // Animate cards entering
   await animateEntry(visibleCards);
 
-  // Now enable interaction
+  // Enable user interaction
   isEntering = false;
 
+  // Start main carousel loop
   startCarousel();
 }
+
+// ============================================================================
+// START APPLICATION
+// ============================================================================
 
 init();
