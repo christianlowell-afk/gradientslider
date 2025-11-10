@@ -34,3 +34,7 @@ const IMAGES = [
 
 Most of the behavior can be tuned via constants at the top of `script.js`
 
+## Credits
+
+created by [Clément Grellier](https://clementgrellier.fr/)
+
