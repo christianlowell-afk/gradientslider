@@ -2,11 +2,17 @@
 
 Smooth, infinite 3D carousel where each image drives a reactive, canvas-based background gradient that adapts to its colors.
 
+![Image Title](https://tympanus.net/codrops/wp-content/uploads/2025/11/carousel.jpg)
+
+[Article on Codrops](https://tympanus.net/codrops/?p=103532)
+
+[Demo](https://tympanus.net/Tutorials/3DGradientCarousel)
+
 ---
 
 ## Features
 
-- 🎠 **Infinite 3D carousel** 
+- 🎠 **Infinite 3D carousel**
 - 🖱️ **Drag & wheel navigation**
 - 🌈 **Reactive gradients**
 - 🪟 **Responsive layout**
@@ -23,6 +29,7 @@ Open `index.html` directly in your browser **or** serve the folder with any stat
 Put your images inside img/
 
 In `script.js`, update the images list:
+
 ```
 const IMAGES = [
   './img/your-image-01.webp',
@@ -30,6 +37,7 @@ const IMAGES = [
   // ...
 ];
 ```
+
 ## Customization
 
 Most of the behavior can be tuned via constants at the top of `script.js`
@@ -37,4 +45,3 @@ Most of the behavior can be tuned via constants at the top of `script.js`
 ## Credits
 
 created by [Clément Grellier](https://clementgrellier.fr/)
-
