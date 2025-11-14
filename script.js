@@ -73,7 +73,7 @@ let lastBgDraw = 0;             // Last background draw time
 // Background gradient state
 let gradPalette = [];           // Extracted colors from each image
 let gradCurrent = {             // Current interpolated gradient colors
-  r1: 70, g1: 70, b1: 70,    // First gradient color (RGB)
+  r1: 77, g1: 7, b1: 0,    // First gradient color (RGB)
   r2: 235, g2: 235, b2: 235     // Second gradient color (RGB)
 };
 let bgFastUntil = 0;            // Timestamp until which to render at high FPS
