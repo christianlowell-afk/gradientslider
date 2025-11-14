@@ -9,7 +9,7 @@
 // ============================================================================
 
 const IMAGES = [
-  '.img/Breathless_1961.png',
+  './img/Breathless_1961.png',
   './img/img02.webp',
   './img/img03.webp',
   './img/img04.webp',
