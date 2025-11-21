@@ -432,7 +432,7 @@ function fallbackFromIndex(idx) {
  * @param {number} idx - Card index (for fallback)
  * @returns {{c1: number[], c2: number[]}} Two dominant RGB colors
  */
-function extractColors(img, idx) {
+async function extractColors(img, idx) {
   try {
     // Downscale image for faster processing
     const MAX = 48;
