@@ -10,6 +10,7 @@
 
 const IMAGES = [
   './img/The_Crow_1994.png',
+  './img/LA Confidential 199.png',
   './img/img02.webp',
   './img/img03.webp',
   './img/img04.webp',
