@@ -937,7 +937,7 @@ async function init() {
     await new Promise((r) => requestIdleCallback(r, { timeout: 100 }));
   }
 
-  // Start background animation
+  // Start background animation 
   startBG();
   await new Promise((r) => setTimeout(r, 100)); // Let background settle
 
