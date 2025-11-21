@@ -494,7 +494,7 @@ function extractColors(img, idx) {
       }
     }
 
-    if (pIdx < 0 || pW <= 0) return fallbackFromIndex(idx);
+    //if (pIdx < 0 || pW <= 0) return fallbackFromIndex(idx);
 
     const pHue = Math.floor(pIdx / S_BINS) * (360 / H_BINS);
 
@@ -544,7 +544,9 @@ function extractColors(img, idx) {
       c2 = hslToRgb(h1, s1, 0.72);
     }
 
-    return { c1, c2 };
+    //return { c1, c2 };
+  const cc = await colorjs.prominent(img, { amount: 2 });
+  return { c1: cc[0], c2: cc[1] };    
   } catch {
     return fallbackFromIndex(idx);
   }
@@ -553,11 +555,15 @@ function extractColors(img, idx) {
 /**
  * Extract colors from all card images
  */
-function buildPalette() {
-  gradPalette = items.map((it, i) => {
-    const img = it.el.querySelector('img');
-    return extractColors(img, i);
-  });
+async function buildPalette() {
+  // Wait for all extractColors() promises to resolve
+  gradPalette = await Promise.all(
+    items.map(async (it, i) => {
+      const img = it.el.querySelector("img");
+      return extractColors(img, i);
+    })
+  );
+  return gradPalette;
 }
 
 /**
@@ -893,7 +899,7 @@ async function init() {
   });
 
   // Extract colors from images for gradients
-  buildPalette();
+ await buildPalette();
 
   // Find and set initial centered card
   const half = TRACK / 2;
