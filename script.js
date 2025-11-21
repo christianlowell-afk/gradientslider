@@ -546,7 +546,7 @@ async function extractColors(img, idx) {
     }
 
     //return { c1, c2 };
-  const cc = await colorjs.prominent(img, { amount: 2 });
+  const cc = await colorjs.prominent(img, { amount: 2, group: 30 });
   return { c1: cc[0], c2: cc[1] };    
   } catch {
     return fallbackFromIndex(idx);
